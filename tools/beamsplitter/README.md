@@ -34,13 +34,19 @@ The source files must have very simple C++ syntax. Some of the limitations inclu
 - If the default value of a field is a vector, it must be in the form: `{ x, y, z }`.
 - There must be no string literals that contain keywords.
 
-### Magic Strings
+### Custom Flags
 
-If the comment for a struct field contains the string `%codegen_skip_json%`, then the field is
-skipped when generating JSON serialization code.
+Backend-specific directives in the form `%codegen_*foo*%` are called *custom flags*.
 
-If the comment for a struct field contains the string `%codegen_skip_javascript%`, then the field is
-skipped when generating JavaScript and TypeScript bindings.
+- If the comment for a struct field contains the string `%codegen_skip_json%`, then the field is
+  skipped when generating JSON serialization code.
+- If the comment for a struct field contains the string `%codegen_skip_javascript%`, then the field
+  is skipped when generating JavaScript and TypeScript bindings.
+- If the comment for a struct field contains the string `%codegen_java_flatten%`, then it must have
+  a custom type in C++ which gets flattened into the parent struct for Java.
+- If the comment for a struct field contains the string `%codegen_java_float%`, then it will be
+  forced to have a `float` representation in Java. The handwritten JNI code needs to convert it to
+  the appropriate C++ type.
 
 ### Input Files
 

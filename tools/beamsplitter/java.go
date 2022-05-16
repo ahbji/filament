@@ -31,6 +31,7 @@ import (
 // Returns a templating function that automatically checks for fatal errors. The returned function
 // takes an output stream, a template name to invoke, and a template context object.
 func createJavaCodeGenerator() func(*os.File, string, parse.TypeDefinition) {
+	// These template extensions are used to transmogrify C++ symbols and value literals to Java.
 	customExtensions := template.FuncMap{
 		"docblock": func(defn parse.Documented, depth int) string {
 			doc := defn.GetDoc()
@@ -43,17 +44,63 @@ func createJavaCodeGenerator() func(*os.File, string, parse.TypeDefinition) {
 			}
 			return "/**\n" + indent + " * " + doc + "\n" + indent + " */\n" + indent
 		},
-		"java_type": func(cpptype string) string {
-			switch cpptype {
-			case "bool":
-				return "boolean"
-			case "uint8_t":
-				return "int"
+		"annotation": func(field parse.StructField, depth int) string {
+			if _, exists := field.CustomFlags["java_float"]; exists {
+				return ""
 			}
-			return cpptype
+			annotation := ""
+			switch {
+			case field.DefaultValue == "nullptr":
+				annotation = "@Nullable"
+			case field.Type == "math::float2":
+				annotation = "@NonNull @Size(min = 2)"
+			case field.Type == "math::float3" || field.Type == "LinearColor":
+				annotation = "@NonNull @Size(min = 3)"
+			case field.Type == "math::float4" || field.Type == "LinearColorA":
+				annotation = "@NonNull @Size(min = 4)"
+			case strings.Contains(field.DefaultValue, "::"):
+				annotation = "@NonNull"
+			default:
+				return ""
+			}
+			return annotation + "\n" + strings.Repeat("    ", depth)
 		},
-		"java_value": func(cppval string) string {
-			return strings.ReplaceAll(cppval, "::", ".")
+		"java_type": func(field parse.StructField) string {
+			if _, exists := field.CustomFlags["java_float"]; exists {
+				return " float"
+			}
+			switch field.Type {
+			case "math::float2", "math::float3", "math::float4", "LinearColor", "LinearColorA":
+				return " float[]"
+			case "bool":
+				return " boolean"
+			case "uint8_t", "uint16_t", "uint32_t":
+				return " int"
+			}
+			return " " + strings.ReplaceAll(field.Type, "*", "")
+		},
+		"java_value": func(field parse.StructField) string {
+			if _, exists := field.CustomFlags["java_float"]; exists {
+				arrayContents := strings.Trim(field.DefaultValue, " []")
+
+				// If we're forcing an array to be bound to a flat, then extract the first component
+				// and use that as the default value.
+				if comma := strings.Index(arrayContents, ","); comma > -1 {
+					return " " + arrayContents[:comma]
+				}
+
+				return " " + arrayContents
+			}
+			if field.DefaultValue == "nullptr" {
+				return " null"
+			}
+			value := strings.ReplaceAll(field.DefaultValue, "::", ".")
+			if field.Type == "float" {
+				value += "f"
+			} else if c := len(value); c > 1 && value[0] == '[' && value[c-1] == ']' {
+				value = "{" + value[1:c-1] + "}"
+			}
+			return " " + value
 		},
 	}
 
@@ -104,13 +151,14 @@ func editJava(definitions []parse.TypeDefinition, classname string, folder strin
 
 	generate := createJavaCodeGenerator()
 
-	enabled := false
-	if enabled {
-		for _, definition := range definitions {
-			switch definition.(type) {
-			case *parse.StructDefinition:
+	for _, definition := range definitions {
+		switch definition.(type) {
+		case *parse.StructDefinition:
+			if definition.Parent() == nil {
 				generate(file, "Struct", definition)
-			case *parse.EnumDefinition:
+			}
+		case *parse.EnumDefinition:
+			if definition.Parent() == nil {
 				generate(file, "Enum", definition)
 			}
 		}
